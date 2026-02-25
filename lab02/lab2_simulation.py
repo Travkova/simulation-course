@@ -7,7 +7,6 @@ from matplotlib.figure import Figure
 
 
 class HeatEquationSolver:
-    #класс решения одномерного уравнения теплопроводности методом сеток
     def __init__(self, L, T_left, T_right, T_initial, rho, c, lambda_):
         self.L = L
         self.T_left = T_left
@@ -17,10 +16,30 @@ class HeatEquationSolver:
         self.c = c
         self.lambda_ = lambda_
 
+    def check_stability(self, dx, dt):
+        alpha = self.lambda_ / (self.rho * self.c) #коэффициент температуропроводности
+        r = alpha * dt / (dx * dx) #параметр Куранта
+        
+        stability_info = {
+            'r': r,
+            'is_stable': r <= 0.5,  # Для явной схемы
+            'message': ''
+        }
+        
+        if r > 0.5:
+            stability_info['message'] = (f"⚠️  Параметр Куранта r = {r:.4f} > 0.5\n"
+                                        f"   Для явной схемы это нарушает устойчивость! Для неявной расчет возможен, но может быть неточным.\n")
+        elif r > 0.25:
+            stability_info['message'] = (f"ℹ️  Параметр Куранта r = {r:.4f} (в пределах нормы)")
+        else:
+            stability_info['message'] = (f"✅ Параметр Куранта r = {r:.4f} (хорошее значение)")
+            
+        return stability_info
+
     def solve(self, dx, dt, t_final):
-        nx = int(self.L / dx) + 1
+        nx = int(self.L / dx) + 1 #кол-во точек по пространству
         x = np.linspace(0, self.L, nx)
-        nt = int(t_final / dt)
+        nt = int(t_final / dt) #кол-во шагов по времени
 
         T = np.full(nx, self.T_initial)
         T[0] = self.T_left
@@ -29,8 +48,11 @@ class HeatEquationSolver:
         alpha = self.lambda_ / (self.rho * self.c)
         r = alpha * dt / (dx * dx)
 
-        center_idx = nx // 2
-        center_temps = []
+        center_idx = nx // 2 #индекс центрального узла
+        center_temps = [] #список для хранения температуры в центре во времени
+
+        # Сохраняем информацию об устойчивости
+        stability_info = self.check_stability(dx, dt)
 
         for n in range(nt):
             T_new = np.copy(T)
@@ -38,9 +60,10 @@ class HeatEquationSolver:
             alpha_coef = np.zeros(nx)
             beta_coef = np.zeros(nx)
 
-            alpha_coef[0] = 0
+            alpha_coef[0] = 0 #начальные условия левой границы
             beta_coef[0] = self.T_left
 
+            #прямой ход метода прогонки
             for i in range(1, nx - 1):
                 A = r
                 B = 1 + 2 * r
@@ -50,9 +73,10 @@ class HeatEquationSolver:
                 alpha_coef[i] = C / (B - A * alpha_coef[i - 1])
                 beta_coef[i] = (A * beta_coef[i - 1] + F) / (B - A * alpha_coef[i - 1])
 
-            alpha_coef[nx - 1] = 0
+            alpha_coef[nx - 1] = 0 #словия для правой границы
             beta_coef[nx - 1] = self.T_right
 
+            #обратный ход
             T_new[nx - 1] = self.T_right
             for i in range(nx - 2, 0, -1):
                 T_new[i] = alpha_coef[i] * T_new[i + 1] + beta_coef[i]
@@ -63,7 +87,7 @@ class HeatEquationSolver:
             if n % 10 == 0 or n == nt - 1:
                 center_temps.append((n * dt, T[center_idx]))
 
-        return x, T, center_temps
+        return x, T, center_temps, stability_info
 
 
 class HeatEquationGUI:
@@ -83,12 +107,12 @@ class HeatEquationGUI:
         self.entry_L.insert(0, "0.1")
         self.entry_L.grid(row=0, column=1, padx=5, pady=2)
 
-        ttk.Label(params_frame, text="T левая граница (°C):").grid(row=0, column=2, sticky=tk.W)
+        ttk.Label(params_frame, text="T на левой границе (°C):").grid(row=0, column=2, sticky=tk.W)
         self.entry_T_left = ttk.Entry(params_frame, width=10)
         self.entry_T_left.insert(0, "100.0")
         self.entry_T_left.grid(row=0, column=3, padx=5, pady=2)
 
-        ttk.Label(params_frame, text="T правая граница (°C):").grid(row=0, column=4, sticky=tk.W)
+        ttk.Label(params_frame, text="T на правой границе (°C):").grid(row=0, column=4, sticky=tk.W)
         self.entry_T_right = ttk.Entry(params_frame, width=10)
         self.entry_T_right.insert(0, "0.0")
         self.entry_T_right.grid(row=0, column=5, padx=5, pady=2)
@@ -131,6 +155,10 @@ class HeatEquationGUI:
         self.entry_dt.insert(0, "0.01")
         self.entry_dt.grid(row=0, column=3, padx=5, pady=2)
 
+        self.stability_label = ttk.Label(grid_frame, text="Проверка устойчивости: не выполнена", 
+                                         foreground="gray")
+        self.stability_label.grid(row=1, column=0, columnspan=4, pady=5)
+
         btn_frame = ttk.Frame(self.root)
         btn_frame.pack(fill=tk.X, padx=5, pady=5)
 
@@ -154,6 +182,20 @@ class HeatEquationGUI:
         self.result_text = tk.Text(result_frame, height=8, width=80)
         self.result_text.pack()
 
+    def update_stability_indicator(self, stability_info):
+        #Обновление индикатора устойчивости в GUI
+        r = stability_info['r']
+        message = stability_info['message']
+        
+        if r > 0.5:
+            color = "red"
+        elif r > 0.25:
+            color = "orange"
+        else:
+            color = "green"
+            
+        self.stability_label.config(text=message, foreground=color)
+
     def solve_single(self):
         try:
             L = float(self.entry_L.get())
@@ -168,7 +210,10 @@ class HeatEquationGUI:
             dt = float(self.entry_dt.get())
 
             solver = HeatEquationSolver(L, T_left, T_right, T_initial, rho, c, lambda_)
-            x, T, center_temps = solver.solve(dx, dt, t_final)
+            x, T, center_temps, stability_info = solver.solve(dx, dt, t_final)
+
+            # Обновляем индикатор устойчивости
+            self.update_stability_indicator(stability_info)
 
             self.ax.clear()
             self.ax.plot(x, T, 'b-', linewidth=2, label=f'dx={dx}, dt={dt}')
@@ -183,7 +228,8 @@ class HeatEquationGUI:
             T_center = T[center_idx]
             x_center = x[center_idx]
 
-            alpha = lambda_ / (rho * c) #коэффициент температуроспособности
+            # Расчет коэффициента температуропроводности
+            alpha = lambda_ / (rho * c)
 
             self.result_text.delete(1.0, tk.END)
             self.result_text.insert(tk.END, f"Результаты моделирования:\n")
@@ -191,9 +237,10 @@ class HeatEquationGUI:
             self.result_text.insert(tk.END, f"Коэффициент температуропроводности α: {alpha:.6f} м²/с\n")
             self.result_text.insert(tk.END, f"Количество узлов по пространству: {len(x)}\n")
             self.result_text.insert(tk.END, f"Количество шагов по времени: {int(t_final/dt)}\n")
-            self.result_text.insert(tk.END,
-                                    f"Температура в центре пластины (x = {x_center:.4f} м): {T_center:.4f} °C\n")
+            self.result_text.insert(tk.END, f"Температура в центре пластины (x = {x_center:.4f} м): {T_center:.4f} °C\n")
             self.result_text.insert(tk.END, f"Время моделирования: {t_final} с\n")
+            self.result_text.insert(tk.END, f"Параметр Куранта r = α·dt/dx² = {stability_info['r']:.6f}\n")
+
         except Exception as e:
             messagebox.showerror("Ошибка", f"Произошла ошибка: {str(e)}")
 
@@ -201,6 +248,8 @@ class HeatEquationGUI:
         self.ax.clear()
         self.canvas.draw()
         self.result_text.delete(1.0, tk.END)
+        self.stability_label.config(text="Проверка устойчивости: не выполнена", foreground="gray")
+
 
 if __name__ == "__main__":
     root = tk.Tk()

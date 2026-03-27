@@ -23,6 +23,7 @@
 *   $X_0$ = 42
 *   $M$ = $2^{63}$
 *   $\beta$ = $2^{32} + 3$
+
 Полученные результаты представлены в виде датасета:
 <img width="867" height="136" alt="image" src="https://github.com/user-attachments/assets/6f976a75-af17-43ff-beed-461bff8fbbd9" />
 

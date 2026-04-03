@@ -287,13 +287,13 @@ class Magic8BallApp:
             return
         
         # Алгоритм генерации события из группы событий
-        alpha = self.generator.rand() 
-        cumulative = 0.0 #накапливаем сумму вероятностей
+        alpha = self.generator.rand()  #генерация случ числа [0,1)
+        A = alpha  
         chosen_index = 0 #индекс выбранного события
         
         for i, p in enumerate(probs):
-            cumulative += p
-            if alpha < cumulative:  #попала ли альфа в интервал
+            A = A - p
+            if A <= 0:  #произошло событие A_k
                 chosen_index = i  #запоминаем индекс
                 break
         

@@ -1,112 +1,88 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-class SimulationMM1:
-    def __init__(self, lam, mu, max_time):
-        self.lam = lam      # Интенсивность прибытия
-        self.mu = mu            # Интенсивность обслуживания
-        self.max_time = max_time
-        
-        # Состояние системы
-        self.t = 0              # Текущее модельное время
-        self.x = 0              # Число клиентов на обслуживании (0 или 1)
-        self.y = 0              # Число клиентов в очереди
-        
-        # Статистика
-        self.wait_times = []      # Время пребывания клиентов в очереди
-        self.system_states = []   # (время, кол-во клиентов в системе)
-        self.arrival_times = []   # Временные метки прибытия клиентов в очередь
+# Параметры системы
+lam = 5.0           # интенсивность прибытия (заявок/ед. времени)
+mu = 6.0            # интенсивность обслуживания (заявок/ед. времени)
+N_requests = 100000 # количество моделируемых заявок
 
-    def run(self):
-        # Начальная генерация событий
-        tau = np.random.exponential(1.0 / self.lam)  # Время до появления следующего клиента
-        delta = float('inf')    # Время до ближайшего окончания обслуживания
-        
-        while self.t < self.max_time:
-            # Сохранение текущего состояния системы для статистики
-            self.system_states.append((self.t, self.x + self.y))
-            
-            # Выбор ближайшего события
-            if tau < delta:
-                # СОБЫТИЕ: Появление клиента
-                self.t += tau
-                delta -= tau  # Уменьшение оставшегося времени обслуживания
-                
-                if self.x < 1:  # Оператор свободен
-                    self.x = 1
-                    self.wait_times.append(0.0)
-                    delta = np.random.exponential(1.0 / self.mu)
-                else:  # В очередь
-                    self.y += 1
-                    self.arrival_times.append(self.t)
-                
-                tau = np.random.exponential(1.0 / self.lam)
-            else:
-                # СОБЫТИЕ: Окончание обслуживания
-                self.t += delta
-                tau -= delta    # Уменьшение времени до нового прибытия
-                
-                if self.y == 0:
-                    self.x = 0
-                    delta = float('inf')
-                else:
-                    self.y -= 1
-                    arrival = self.arrival_times.pop(0)
-                    self.wait_times.append(self.t - arrival)
-                    delta = np.random.exponential(1.0 / self.mu)
+np.random.seed(42)  # для воспроизводимости результатов
 
-        return self.wait_times, self.system_states
+# Генерация случ потоков
+inter_arrivals = np.random.exponential(1.0 / lam, N_requests)
+service_times = np.random.exponential(1.0 / mu, N_requests)
 
-    def get_distribution_data(self):
-        # Расчёт среднего времени пребывания системы в каждом состоянии
-        total_times = {}
-        for i in range(len(self.system_states) - 1):
-            start_t, count = self.system_states[i]
-            end_t, _ = self.system_states[i+1]
-            duration = end_t - start_t
-            total_times[count] = total_times.get(count, 0.0) + duration
-            
-        # Вероятности нахождения n клиентов в системе
-        counts = sorted(total_times.keys())
-        probs = [total_times[c] / self.t for c in counts]
-        return counts, probs
+# Абсолютные моменты прибытия заявок
+arrival_times = np.cumsum(inter_arrivals)
 
+# Моделирование состояний сервера
+server_free_time = 0.0  # момент, когда сервер освободится после текущей заявки
+accepted = 0
+rejected = 0
 
-if __name__ == "__main__":
-    # Параметры модели
-    LAMBDA = 2.0
-    MU = 2.5
-    MAX_TIME = 10000.0
+for i in range(N_requests):
+    t_arr = arrival_times[i]
     
-    print(f"Запуск моделирования M/M/1 | λ={LAMBDA}, μ={MU}, T={MAX_TIME}")
-    sim = SimulationMM1(LAMBDA, MU, MAX_TIME)
-    wait_times, states = sim.run()
-    counts, probs = sim.get_distribution_data()
-    
-    # Консольный вывод результатов
-    avg_wait = np.mean(wait_times) if wait_times else 0.0
-    rho = LAMBDA / MU
-    print(f" Смоделировано состояний: {len(states)}")
-    print(f" Среднее время ожидания в очереди: {avg_wait:.2f}")
-    print(f" Загрузка системы (ρ): {rho:.2f}")
-    print(f" Вероятность простоя (P0): {probs[0] if 0 in counts else 0:.3f}")
-    
-    # Построение графиков
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-    
-    # Полигон распределения числа клиентов в системе
-    ax1.plot(counts, probs, marker='o', linestyle='-', color='purple', linewidth=2)
-    ax1.set_title("Эмпирическое распределение числа клиентов")
-    ax1.set_xlabel("Количество клиентов (n)")
-    ax1.set_ylabel("Вероятность P(n)")
-    ax1.grid(True, linestyle='--', alpha=0.6)
-    
-    # Гистограмма времени ожидания в очереди
-    ax2.hist(wait_times, bins=30, density=True, color='orange', alpha=0.7, edgecolor='black')
-    ax2.set_title("Распределение времени в очереди")
-    ax2.set_xlabel("Время ожидания (t)")
-    ax2.set_ylabel("Плотность вероятности")
-    ax2.grid(True, linestyle='--', alpha=0.6)
-    
-    plt.tight_layout()
-    plt.show()
+    if t_arr >= server_free_time:
+        # Сервер свободен -> заявка принимается
+        accepted += 1
+        server_free_time = t_arr + service_times[i]
+    else:
+        # Сервер занят -> ОТКАЗ (система без очереди)
+        rejected += 1
+
+# Статистическая обработка
+p0_emp = accepted / N_requests   # вероятность простоя
+p1_emp = rejected / N_requests   # вероятность занятости / отказа
+
+# Теоретические значения (формула Эрланга B для 1 канала)
+rho = lam / mu
+p0_theor = 1.0 / (1.0 + rho)
+p1_theor = rho / (1.0 + rho)
+
+# Абсолютная пропускная способность: A = λ × P₀
+A_emp = lam * p0_emp             # эмпирическая
+A_theor = lam * p0_theor         # теоретическая
+
+# Вывод
+print("-" * 30)
+print(" ПАРАМЕТРЫ СИСТЕМЫ M/M/1:")
+print(f"   λ = {lam} | μ = {mu} | ρ = {rho:.4f}")
+print(f"   Всего заявок: {N_requests} | Принято: {accepted} | Отказано: {rejected}")
+print("-" * 30)
+print(" ВЕРОЯТНОСТИ СОСТОЯНИЙ:")
+print(f"   P₀ (свободен):  Эмп={p0_emp:.4f} | Теор={p0_theor:.4f} | Δ={abs(p0_emp-p0_theor):.4f}")
+print(f"   P₁ (занят):     Эмп={p1_emp:.4f} | Теор={p1_theor:.4f} | Δ={abs(p1_emp-p1_theor):.4f}")
+print("-" * 30)
+print(" ПРОПУСКНАЯ СПОСОБНОСТЬ:")
+print(f"   Абсолютная (эмпирическая):  A = λ×P₀ = {lam} × {p0_emp:.4f} = {A_emp:.4f} заявок/ед.вр.")
+print(f"   Абсолютная (теоретическая): A = λ×P₀ = {lam} × {p0_theor:.4f} = {A_theor:.4f} заявок/ед.вр.")
+print(f"   Отклонение: {abs(A_emp - A_theor):.4f} ({abs(A_emp-A_theor)/A_theor*100:.2f}%)")
+print("-" * 30)
+
+# Визуализация
+plt.figure(figsize=(8, 5))
+
+labels = ['P0 (Свободен)', 'P1 (Занят/Отказ)']
+x = np.arange(len(labels))
+width = 0.35
+
+plt.bar(x - width/2, [p0_theor, p1_theor], width, label='Теоретическое', color='skyblue', edgecolor='black')
+plt.bar(x + width/2, [p0_emp, p1_emp], width, label='Эмпирическое', color='salmon', edgecolor='black')
+
+plt.ylabel('Вероятность')
+plt.title(f'Сравнение вероятностей состояний СМО\n(ρ = {rho:.3f}, N = {N_requests})')
+plt.xticks(x, labels)
+plt.legend()
+plt.grid(axis='y', linestyle='--', alpha=0.6)
+plt.ylim(0, 1.05)
+
+# Добавление числовых значений на столбцы
+for i, v in enumerate([p0_theor, p1_theor]):
+    plt.text(i - width/2, v + 0.015, f'{v:.3f}', ha='center', fontsize=10, fontweight='bold')
+for i, v in enumerate([p0_emp, p1_emp]):
+    plt.text(i + width/2, v + 0.015, f'{v:.3f}', ha='center', fontsize=10, fontweight='bold')
+
+plt.tight_layout()
+plt.show()
+
